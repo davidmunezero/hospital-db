@@ -44,33 +44,41 @@ Foreign keys connect related records. The scripts enable SQLite foreign-key enfo
 - Python 3.9 or later
 - SQLAlchemy
 
-Install SQLAlchemy if it is not already available:
+## Setup and usage
+
+The commands below assume you run the scripts from the `src/` directory. The scripts use relative paths to find the CSV files in `data/` and create/use `hospital.db` in the repository root.
+
+### 1. Install dependencies
+
+From the repository root, install SQLAlchemy:
 
 ```bash
-python -m pip install SQLAlchemy
+pip install sqlalchemy
 ```
 
-## Getting started
+### 2. Configure the database
 
-The scripts use paths relative to their current working directory. Run them from `src/` so they find the CSV files and use the repository-root `hospital.db`:
+Change to the source directory and create the database tables:
 
 ```bash
 cd src
 python create_tables.py
-python insert_data.py
 ```
 
-`create_tables.py` creates any missing tables. `insert_data.py` loads the CSV files from `data/` in dependency order. **The data loader deletes all existing rows in the database tables before importing the CSV data.** Back up any database contents you need before running it.
+This creates any missing tables in the SQLite database at `../hospital.db`.
 
-## Reports and example modifications
+### 3. Run the program
 
-From the same `src/` directory, run:
+After the database has been configured, load the sample CSV data and run the reports:
 
 ```bash
+python insert_data.py
 python queries.py
 ```
 
-The script writes the following CSV reports under `queries/`:
+`insert_data.py` loads the CSV files from `../data/` in dependency order. **The data loader deletes all existing rows in the database tables before importing the CSV data.** Back up any database contents you need before running it.
+
+`queries.py` writes these CSV reports to `../queries/`:
 
 1. `q1.csv` — patient names, phone numbers, and insurance providers.
 2. `q2.csv` — doctors and appointment counts, ordered by workload.
