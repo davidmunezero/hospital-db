@@ -1,0 +1,16 @@
+﻿appointmentID,appointmentDate,roomNo,diagnosis,patientID,doctorID
+1,2026-09-01,R101,Hypertension,1,1
+2,2026-09-01,R102,Common cold,5,2
+3,2026-09-02,R201,Appendicitis,2,3
+4,2026-09-02,R301,Tooth decay,3,4
+5,2026-09-03,ER1,Fractured wrist,4,5
+6,2026-09-04,R101,Type 2 diabetes follow-up,4,1
+7,2026-09-07,R102,Ear infection,5,2
+8,2026-09-08,R201,Hernia check,2,3
+9,2026-09-09,R301,Routine dental cleaning,1,4
+10,2026-09-10,ER1,Acute abdominal pain,3,5
+11,2026-09-14,R101,Malaria,3,1
+12,2026-09-15,R102,Vaccination review,5,2
+13,2026-09-16,R101,Hypertension follow-up,1,1
+14,2026-09-17,R301,Gum inflammation,2,4
+15,2026-09-18,ER1,Minor burn,4,5
