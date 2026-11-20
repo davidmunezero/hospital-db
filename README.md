@@ -65,16 +65,104 @@ class Patient(Base):
         Integer,
         ForeignKey("insurances.insuranceID", ondelete="SET NULL", onupdate="CASCADE"),
     )
-    insurance = relationship("Insurance", back_populates="patients")
+    insurance = relationship("Insurance", back_populates="insurance")
     appointments = relationship("Appointment", back_populates="patient")
     payments = relationship("Payment", back_populates="patient")
 ```
 
-In this mapping, `primary_key=True` identifies a table's primary key; `nullable=False` marks required fields; `unique=True` enforces unique phone numbers; and `CheckConstraint` restricts insurance coverage to 0–100. The patient's `insuranceID` foreign key connects it to `insurances.insuranceID`. The `ForeignKey()` establishes the referential integrity constraint. The `relationship()` declarations provide ORM navigation between records, while `back_populates` pairs the relationship on each model. Relationships are not additional database columns.
+In this mapping, `primary_key=True` identifies a table's primary key; `nullable=False` marks required fields; `unique=True` enforces unique phone numbers; and `CheckConstraint` restricts insurance coverage to 0–100. The patient's `insuranceID` foreign key connects it to `insurances.insuranceID`. The `relationship()` declarations provide ORM navigation between records, while `back_populates` pairs the relationship on each model. Relationships are not additional database columns.
 
 The same approach maps doctors, departments, appointments, prescriptions, and payments. For example, appointments reference both patients and doctors, prescriptions reference appointments, and payments reference patients. `Base.metadata.create_all(engine)` creates the tables from the model definitions if they do not already exist; it does not migrate or rebuild existing tables.
 
 ## Inserting Data
+
+Sample records are stored as CSV files in the `data/` directory. `src/insert_data.py` reads those files and creates SQLAlchemy model objects, rather than sending raw `INSERT` statements manually. The import process has the following steps:
+
+1. It maps each table to its CSV file using `FILE_PATHS`.
+2. It verifies that every required CSV file exists.
+3. It removes existing rows so that re-running the import does not create duplicates.
+4. It inserts parent and child tables in foreign-key dependency order.
+5. It converts date and date-time strings from CSV data into Python objects before creating ORM records.
+
+The script begins with a dictionary that associates each model with a source file:
+
+```python
+FILE_PATHS = {
+    "insurance": "../data/insurance.csv",
+    "patient": "../data/patient.csv",
+    "doctor": "../data/doctor.csv",
+    "dept": "../data/department.csv",
+    "appointment": "../data/appointment.csv",
+    "prescription": "../data/prescription.csv",
+    "payment": "../data/payment.csv",
+}
+```
+
+Before loading data, `tables_exist()` opens every listed file and exits without starting the import if any file is missing. Existing rows are then deleted in reverse model dependency order:
+
+```python
+for table in reversed(Base.metadata.sorted_tables):
+    session.execute(delete(table))
+session.commit()
+```
+
+Each CSV file is read using `csv.DictReader`, which converts every row into a dictionary keyed by the CSV header. Empty rows are skipped. Each dictionary value is converted into the appropriate SQLAlchemy model fields, and the resulting objects are collected in a list:
+
+```python
+patients = []
+with open(filepath, encoding="utf-8-sig") as file:
+    reader = DictReader(file)
+    for row in reader:
+        if all(not record for record in row.values()):
+            continue
+
+        patient = Patient(
+            patientID=row["patientID"],
+            patientName=row["patientName"],
+            birthdate=date.fromisoformat(row["birthdate"]),
+            phone=row["phone"],
+            address=row["address"],
+            insuranceID=row["insuranceID"] or None,
+        )
+        patients.append(patient)
+
+session.add_all(patients)
+session.commit()
+```
+
+Some relationships allow the foreign key to be absent. Therefore, foreign-key values such as `insuranceID`, `deptHead`, `patientID`, `doctorID`, and `appointmentID` are converted to `None` when their CSV value is empty. Empty optional relationships are represented as SQL `NULL` instead of invalid foreign-key references.
+
+Date and date-time fields receive special conversion:
+
+- `birthdate` and `joinDate` use `date.fromisoformat()` because they represent dates.
+- `appointmentDate` and `paymentDate` use `datetime.fromisoformat()` because they include time information.
+- Numeric fields such as coverage, salary, budget, and amount are passed to SQLAlchemy for conversion and validation.
+
+Each insert function uses a `Session` transaction. `session.begin()` starts the transaction, `session.add_all()` adds a collection of ORM objects, and `session.commit()` writes the objects to SQLite. If an exception occurs, `session.rollback()` restores the database to the state before the transaction. 
+
+The insertion order is deliberately dependency-based:
+
+1. Insurance records
+2. Patient records
+3. Doctor records
+4. Department records
+5. Appointment records
+6. Prescription records
+7. Payment records
+
+This order ensures that parent records exist before a child record references them. The `main()` function performs the complete import by removing existing data and then calling the corresponding insert function for every CSV file:
+
+```python
+main()
+drop_existing_data()
+insert_insurances(FILE_PATHS["insurance"])
+insert_patients(FILE_PATHS["patient"])
+insert_doctors(FILE_PATHS["doctor"])
+insert_depts(FILE_PATHS["dept"])
+insert_appointments(FILE_PATHS["appointment"])
+insert_prescriptions(FILE_PATHS["prescription"])
+insert_payments(FILE_PATHS["payment"])
+```
 
 ## Queries and reports
 
@@ -115,9 +203,11 @@ Reports patient ID and name, insurance provider, number of payments, and total a
 
 ```python
 result = session.execute(text("""
-    SELECT p.patientID, p.patientName, i.provider, COUNT(py.patientID) as total_payments,
-    SUM(py.amount) AS total_amount FROM patients p LEFT JOIN payments py 
-    ON py.patientID = p.patientID JOIN insurances i ON p.insuranceID = i.insuranceID
+    SELECT p.patientID, p.patientName, i.provider, COUNT(py.patientID) AS total_payments,
+           SUM(py.amount) AS total_amount
+    FROM patients p
+    LEFT JOIN payments py ON py.patientID = p.patientID
+    JOIN insurances i ON p.insuranceID = i.insuranceID
     GROUP BY p.patientID, p.patientName, i.provider
     ORDER BY total_amount
 """))
@@ -180,7 +270,7 @@ python insert_data.py
 python queries.py
 ```
 
-`insert_data.py` loads the CSV files from `../data/` in dependency order. **The data loader deletes all existing rows in the database tables before importing the CSV data.** This is to avoid inserting duplicate data in the DB. 
+`insert_data.py` loads the CSV files from `../data/` in dependency order. **The data loader deletes all existing rows in the database tables before importing the CSV data.** This is to avoid inserting duplicate records when the script is run again.
 
 ## License
 
