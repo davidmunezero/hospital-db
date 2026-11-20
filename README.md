@@ -1,6 +1,6 @@
 # Hospital Management Database
 
-A small hospital-management database project built with Python, SQLAlchemy, and SQLite. It defines a relational schema for hospital operations, loads CSV sample data, and runs reports and update/delete examples.
+A small hospital-management database project built with Python, SQLAlchemy, and SQLite. It defines a relational schema for hospital operations, loads CSV sample data, and produces reports and update/delete examples.
 
 ## Overview
 
@@ -8,7 +8,22 @@ The database tracks patients, insurance providers, doctors, departments, appoint
 
 This repository is intended as an educational example of relational database design and SQLAlchemy workflows. The included CSV files contain sample data, not a production-ready patient record system.
 
-## Schema
+## Project contents
+
+```text
+.
+├── data/                 # CSV source data for each table
+├── queries/              # CSV report outputs (q1.csv through q4.csv)
+├── src/
+│   ├── create_tables.py  # SQLAlchemy models and table creation
+│   ├── insert_data.py    # Load CSV data into the database
+│   └── queries.py        # Reports and example data modifications
+├── hospital.db           # SQLite database file
+├── schema.png            # Database schema diagram
+└── README.md
+```
+
+## Database Schema
 
 The schema is illustrated in [`schema.png`](schema.png).
 
@@ -24,9 +39,9 @@ The schema is illustrated in [`schema.png`](schema.png).
 
 Foreign keys connect related records. The scripts enable SQLite foreign-key enforcement when opening a connection, and the models include checks for values such as positive salaries and payment amounts and insurance coverage between 0 and 100.
 
-### Translating the schema into SQLAlchemy models
+## Object-Relational Mapping (ORM)
 
-Each entity in the schema diagram is represented by a SQLAlchemy model class. The class maps to a table through `__tablename__`, and the entity's attributes become columns with appropriate data types and constraints. For example, the insurance and patient entities map to `Insurance` and `Patient`:
+Each entity in the schema diagram is represented by a **SQLAlchemy model class**. The class maps to a table through `__tablename__`, and the entity's attributes become columns with appropriate data types and constraints. For example, the insurance and patient entities map to `Insurance` and `Patient`:
 
 ```python
 class Insurance(Base):
@@ -55,24 +70,78 @@ class Patient(Base):
     payments = relationship("Payment", back_populates="patient")
 ```
 
-In this mapping, `primary_key=True` identifies a table's primary key; `nullable=False` marks required fields; `unique=True` enforces unique phone numbers; and `CheckConstraint` restricts insurance coverage to 0–100. The patient's `insuranceID` foreign key connects it to `insurances.insuranceID`. The `relationship()` declarations provide ORM navigation between records, while `back_populates` pairs the relationship on each model. Relationships are not additional database columns.
+In this mapping, `primary_key=True` identifies a table's primary key; `nullable=False` marks required fields; `unique=True` enforces unique phone numbers; and `CheckConstraint` restricts insurance coverage to 0–100. The patient's `insuranceID` foreign key connects it to `insurances.insuranceID`. The `ForeignKey()` establishes the referential integrity constraint. The `relationship()` declarations provide ORM navigation between records, while `back_populates` pairs the relationship on each model. Relationships are not additional database columns.
 
 The same approach maps doctors, departments, appointments, prescriptions, and payments. For example, appointments reference both patients and doctors, prescriptions reference appointments, and payments reference patients. `Base.metadata.create_all(engine)` creates the tables from the model definitions if they do not already exist; it does not migrate or rebuild existing tables.
 
-## Project contents
+## Inserting Data
 
-```text
-.
-├── data/                 # CSV source data for each table
-├── queries/              # CSV report outputs (q1.csv through q4.csv)
-├── src/
-│   ├── create_tables.py  # SQLAlchemy models and table creation
-│   ├── insert_data.py    # Load CSV data into the database
-│   └── queries.py        # Reports and example data modifications
-├── hospital.db           # SQLite database file
-├── schema.png            # Database schema diagram
-└── README.md
+## Queries and reports
+
+Running `queries.py` writes four CSV reports under `../queries/`. The report functions use SQLAlchemy ORM queries or SQL executed through the session, then pass the rows to a CSV DictWriter.
+
+### `q1.csv` — Patients and insurance
+
+Lists patient names and phone numbers with their insurance provider, sorted alphabetically by patient name. The ORM query uses `joinedload` to fetch the related insurance along with each patient and avoids a separate lookup for every patient. Patients without linked insurance are labeled `No Insurance`.
+
+```python
+patients = (
+    session.query(Patient)
+    .options(joinedload(Patient.insurance))
+    .order_by(Patient.patientName)
+    .all()
+)
 ```
+
+### `q2.csv` — Doctor workload
+
+Lists doctors and their appointment counts in descending workload order. An outer join includes doctors who have no appointments; their count is zero. The query groups by doctor so each doctor appears once.
+
+```python
+results = (
+    session.query(
+        Doctor.doctorName, func.count(Appointment.doctorID).label("count")
+    )
+    .outerjoin(Appointment, Doctor.doctorID == Appointment.doctorID)
+    .group_by(Doctor.doctorID, Doctor.doctorName)
+    .order_by(func.count(Appointment.doctorID).desc())
+    .all()
+)
+```
+
+### `q3.csv` — Patient payment summary
+
+Reports patient ID and name, insurance provider, number of payments, and total amount paid. SQL joins patients to payments and insurance, groups the rows by patient and provider, and orders by total paid amount ascending. Because the insurance table is joined with an inner `JOIN`, patients without an insurance record are not included in this report.
+
+```python
+result = session.execute(text("""
+    SELECT p.patientID, p.patientName, i.provider, COUNT(py.patientID) as total_payments,
+    SUM(py.amount) AS total_amount FROM patients p LEFT JOIN payments py 
+    ON py.patientID = p.patientID JOIN insurances i ON p.insuranceID = i.insuranceID
+    GROUP BY p.patientID, p.patientName, i.provider
+    ORDER BY total_amount
+"""))
+```
+
+### `q4.csv` — Doctor appointment rankings
+
+Counts appointments per doctor, including doctors with no appointments, then ranks doctors by appointment count from highest to lowest. A common table expression (CTE) names the intermediate per-doctor totals. `DENSE_RANK()` gives doctors with equal counts the same rank, without gaps in subsequent ranks.
+
+```sql
+WITH doctor_ap AS (
+    SELECT d.doctorName, d.speciality, COUNT(ap.doctorID) AS total_appointments
+    FROM doctors d
+    LEFT JOIN appointments ap ON ap.doctorID = d.doctorID
+    GROUP BY d.doctorID, d.doctorName
+)
+SELECT doctorName, speciality, total_appointments,
+       DENSE_RANK() OVER (ORDER BY total_appointments DESC) AS ranking
+FROM doctor_ap;
+```
+
+### Database Changes Made By the Query Script
+
+In addition to creating reports, `queries.py` increases the salary of doctors with rank `Senior` by 5% and attempts to delete payment record `10`. Re-running it can apply the salary increase again. Use a copy of the database if you want to preserve the original data.
 
 ## Requirements
 
@@ -111,70 +180,7 @@ python insert_data.py
 python queries.py
 ```
 
-`insert_data.py` loads the CSV files from `../data/` in dependency order. **The data loader deletes all existing rows in the database tables before importing the CSV data.** Back up any database contents you need before running it.
-
-## Queries and reports
-
-Running `queries.py` writes four CSV reports under `../queries/`. The report functions use SQLAlchemy ORM queries or SQL executed through the session, then pass the rows to a CSV writer.
-
-### `q1.csv` — Patients and insurance
-
-Lists patient names and phone numbers with their insurance provider, sorted alphabetically by patient name. The ORM query uses `joinedload` to fetch the related insurance along with each patient and avoids a separate lookup for every patient. Patients without linked insurance are labeled `No Insurance`.
-
-```python
-patients = (
-    session.query(Patient)
-    .options(joinedload(Patient.insurance))
-    .order_by(Patient.patientName)
-    .all()
-)
-```
-
-### `q2.csv` — Doctor workload
-
-Lists doctors and their appointment counts in descending workload order. An outer join includes doctors who have no appointments; their count is zero. The query groups by doctor so each doctor appears once.
-
-```python
-results = (
-    session.query(
-        Doctor.doctorName, func.count(Appointment.doctorID).label("count")
-    )
-    .outerjoin(Appointment, Doctor.doctorID == Appointment.doctorID)
-    .group_by(Doctor.doctorID, Doctor.doctorName)
-    .order_by(func.count(Appointment.doctorID).desc())
-    .all()
-)
-```
-
-### `q3.csv` — Patient payment summary
-
-Reports patient ID and name, insurance provider, number of payments, and total amount paid. SQL joins patients to payments and insurance, groups the rows by patient and provider, and orders by total paid amount ascending. Because the insurance table is joined with an inner `JOIN`, patients without an insurance record are not included in this report.
-
-### `q4.csv` — Doctor appointment rankings
-
-Counts appointments per doctor, including doctors with no appointments, then ranks doctors by appointment count from highest to lowest. A common table expression (CTE) names the intermediate per-doctor totals. `DENSE_RANK()` gives doctors with equal counts the same rank, without gaps in subsequent ranks.
-
-```sql
-WITH doctor_ap AS (
-    SELECT d.doctorName, d.speciality, COUNT(ap.doctorID) AS total_appointments
-    FROM doctors d
-    LEFT JOIN appointments ap ON ap.doctorID = d.doctorID
-    GROUP BY d.doctorID, d.doctorName
-)
-SELECT doctorName, speciality, total_appointments,
-       DENSE_RANK() OVER (ORDER BY total_appointments DESC) AS ranking
-FROM doctor_ap;
-```
-
-### Database changes made by the query script
-
-In addition to creating reports, `queries.py` increases the salary of doctors with rank `Senior` by 5% and attempts to delete payment record `10`. Re-running it can apply the salary increase again. Use a copy of the database if you want to preserve the original data.
-
-## Implementation
-
-- `src/create_tables.py` defines the SQLAlchemy models and creates the schema.
-- `src/insert_data.py` reads the CSV files with Python's `csv` module and inserts records using SQLAlchemy sessions.
-- `src/queries.py` demonstrates ORM and SQL queries, writes report results as CSV files, and includes update and delete operations.
+`insert_data.py` loads the CSV files from `../data/` in dependency order. **The data loader deletes all existing rows in the database tables before importing the CSV data.** This is to avoid inserting duplicate data in the DB. 
 
 ## License
 
