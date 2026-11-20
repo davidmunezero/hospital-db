@@ -25,7 +25,7 @@ This repository is intended as an educational example of relational database des
 
 ## Database Schema
 
-The schema is illustrated in [`schema.png`](schema.png).
+![Hospital database schema](schema.png)
 
 | Table | Purpose |
 | --- | --- |
@@ -65,7 +65,7 @@ class Patient(Base):
         Integer,
         ForeignKey("insurances.insuranceID", ondelete="SET NULL", onupdate="CASCADE"),
     )
-    insurance = relationship("Insurance", back_populates="insurance")
+    insurance = relationship("Insurance", back_populates="patients")
     appointments = relationship("Appointment", back_populates="patient")
     payments = relationship("Payment", back_populates="patient")
 ```
@@ -113,7 +113,7 @@ patients = []
 with open(filepath, encoding="utf-8-sig") as file:
     reader = DictReader(file)
     for row in reader:
-        if all(not record for record in row.values()):
+        if all(not record for record in row.values():
             continue
 
         patient = Patient(
@@ -138,7 +138,7 @@ Date and date-time fields receive special conversion:
 - `appointmentDate` and `paymentDate` use `datetime.fromisoformat()` because they include time information.
 - Numeric fields such as coverage, salary, budget, and amount are passed to SQLAlchemy for conversion and validation.
 
-Each insert function uses a `Session` transaction. `session.begin()` starts the transaction, `session.add_all()` adds a collection of ORM objects, and `session.commit()` writes the objects to SQLite. If an exception occurs, `session.rollback()` restores the database to the state before the transaction. 
+Each insert function uses a `Session` transaction. `session.begin()` starts the transaction, `session.add_all()` adds a collection of ORM objects, and `session.commit()` writes the objects to SQLite. If an exception occurs, `session.rollback()` restores the database to the state before the transaction.
 
 The insertion order is deliberately dependency-based:
 
@@ -153,7 +153,6 @@ The insertion order is deliberately dependency-based:
 This order ensures that parent records exist before a child record references them. The `main()` function performs the complete import by removing existing data and then calling the corresponding insert function for every CSV file:
 
 ```python
-main()
 drop_existing_data()
 insert_insurances(FILE_PATHS["insurance"])
 insert_patients(FILE_PATHS["patient"])
